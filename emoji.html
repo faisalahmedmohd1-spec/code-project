@@ -1,0 +1,140 @@
+const express = require('express');
+const cors = require('cors');
+const Sentiment = require('sentiment');
+const mongoose = require('mongoose');
+
+const app = express();
+const sentiment = new Sentiment();
+
+app.use(cors());
+app.use(express.json());
+
+// Connect to MongoDB
+mongoose.connect('mongodb://localhost:27017/moodtracker', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
+
+const moodSchema = new mongoose.Schema({
+  date: { type: Date, default: Date.now },
+  mood: String,
+  text: String,
+  sentimentScore: Number,
+});
+
+const Mood = mongoose.model('Mood', moodSchema);
+
+// Submit mood
+app.post('/api/mood', async (req, res) => {
+  const { mood, text } = req.body;
+  const result = sentiment.analyze(text || '');
+  const sentimentScore = result.score;
+
+  const moodEntry = new Mood({ mood, text, sentimentScore });
+  await moodEntry.save();
+
+  res.json({ message: 'Mood saved', moodEntry });
+});
+
+// Get all moods
+app.get('/api/mood', async (req, res) => {
+  const moods = await Mood.find().sort({ date: 1 });
+  res.json(moods);
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { Line } from 'react-chartjs-2';
+
+const wellnessTips = {
+  happy: ['Keep spreading joy!', 'Try a gratitude journal today.'],
+  neutral: ['Consider some mindfulness meditation.', 'Take a short walk.'],
+  sad: ['Try deep breathing exercises.', 'Reach out to a friend.'],
+};
+
+const App = () => {
+  const [mood, setMood] = useState('neutral');
+  const [text, setText] = useState('');
+  const [moodsHistory, setMoodsHistory] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+
+  // Fetch moods history from backend
+  useEffect(() => {
+    axios.get('http://localhost:5000/api/mood').then((res) => {
+      setMoodsHistory(res.data);
+    });
+  }, []);
+
+  // Submit mood check-in
+  const submitMood = () => {
+    axios.post('http://localhost:5000/api/mood', { mood, text }).then((res) => {
+      setMoodsHistory([...moodsHistory, res.data.moodEntry]);
+      setText('');
+      generateRecommendations(mood);
+    });
+  };
+
+  // Generate wellness tips based on mood
+  const generateRecommendations = (currentMood) => {
+    setRecommendations(wellnessTips[currentMood] || []);
+  };
+
+  // Prepare data for chart
+  const chartData = {
+    labels: moodsHistory.map((m) => new Date(m.date).toLocaleDateString()),
+    datasets: [
+      {
+        label: 'Mood Score',
+        data: moodsHistory.map((m) => {
+          switch (m.mood) {
+            case 'happy':
+              return 3;
+            case 'neutral':
+              return 2;
+            case 'sad':
+              return 1;
+            default:
+              return 2;
+          }
+        }),
+        fill: false,
+        borderColor: '#007bff',
+        tension: 0.1,
+      },
+    ],
+  };
+
+  return (
+    <div style={{ maxWidth: 600, margin: 'auto', padding: 20 }}>
+      <h2>Daily Mood Check-In</h2>
+      <select value={mood} onChange={(e) => setMood(e.target.value)}>
+        <option value="happy">😊 Happy</option>
+        <option value="neutral">😐 Neutral</option>
+        <option value="sad">😢 Sad</option>
+      </select>
+      <textarea
+        placeholder="How are you feeling?"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        style={{ width: '100%', height: 80, marginTop: 10 }}
+      />
+      <button onClick={submitMood} style={{ marginTop: 10 }}>
+        Submit
+      </button>
+
+      <h3>Wellness Recommendations</h3>
+      <ul>
+        {recommendations.map((tip, idx) => (
+          <li key={idx}>{tip}</li>
+        ))}
+      </ul>
+
+      <h3>Mood Trends</h3>
+      <Line data={chartData} />
+    </div>
+  );
+};
+
+export default App;
